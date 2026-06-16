@@ -22,12 +22,15 @@ export class Order {
 
   public map: any;
   private mapRoute: any;
+  private fromPlacemark: any;
+  private toPlacemark: any;
 
   public routeForm: FormGroup;
   public orderForm: FormGroup;
 
   public orderId: any = signal(null);
   public calculationResult: any = signal(null);
+  public isLoading = signal(false);
 
   constructor(private formBuilder: FormBuilder, private deliveryApi: DeliveryApi) {
     this.routeForm = this.formBuilder.group({
@@ -41,6 +44,121 @@ export class Order {
       phone: ['', [Validators.required]],
       comment: ['']
     });
+  }
+
+  private resetState() {
+    this.calculationResult.set(null);
+    
+    if (this.mapRoute) {
+      this.map.geoObjects.remove(this.mapRoute);
+      this.mapRoute = null;
+    }
+    
+    if (this.orderId()) {
+      this.orderId.set(null);
+      this.orderForm.reset();
+      this.toastr.info('Состояние сброшено. Выберите новые параметры для расчета.');
+    }
+  }
+
+  private createPlacemark(address: string, isFrom: boolean = true) {
+    if (!this.map || !address || address.trim().length < 3) {
+      return;
+    }
+
+    ymaps.geocode(address, { kind: 'house' }).then(
+      (res: any) => {
+        const first = res.geoObjects.get(0);
+        if (first) {
+          const coords = first.geometry.getCoordinates();
+          
+          const placemark = new ymaps.Placemark(
+            coords,
+            {
+              iconCaption: isFrom ? 'Отправление' : 'Назначение'
+            },
+            {
+              preset: isFrom ? 'islands#orangeDotIcon' : 'islands#greenDotIcon'
+            }
+          );
+
+          if (isFrom) {
+            if (this.fromPlacemark) {
+              this.map.geoObjects.remove(this.fromPlacemark);
+            }
+            this.fromPlacemark = placemark;
+          } else {
+            if (this.toPlacemark) {
+              this.map.geoObjects.remove(this.toPlacemark);
+            }
+            this.toPlacemark = placemark;
+          }
+          this.map.geoObjects.add(placemark);
+
+          this.map.setCenter(coords, 15, {
+            duration: 500,
+            flying: true
+          });
+        }
+      },
+      () => {}
+    );
+  }
+
+  private updatePlacemarksAddress(from: string, to: string) {
+    // Проверяем метку "Откуда"
+    const fromContent = this.fromPlacemark?.properties?.get('balloonContent');
+    if (fromContent !== 'Отправление: ' + from) {
+      if (this.fromPlacemark) {
+        this.map.geoObjects.remove(this.fromPlacemark);
+        this.fromPlacemark = null;
+      }
+      ymaps.geocode(from, { kind: 'house' }).then(
+        (res: any) => {
+          const first = res.geoObjects.get(0);
+          if (first) {
+            const coords = first.geometry.getCoordinates();
+            this.fromPlacemark = new ymaps.Placemark(
+              coords,
+              {
+                iconCaption: 'Отправление',
+                balloonContent: 'Отправление: ' + from
+              },
+              { preset: 'islands#orangeDotIcon' }
+            );
+            this.map.geoObjects.add(this.fromPlacemark);
+          }
+        },
+        () => {}
+      );
+    }
+
+    // Проверяем метку "Куда"
+    const toContent = this.toPlacemark?.properties?.get('balloonContent');
+    if (toContent !== 'Назначение: ' + to) {
+      if (this.toPlacemark) {
+        this.map.geoObjects.remove(this.toPlacemark);
+        this.toPlacemark = null;
+      }
+      ymaps.geocode(to, { kind: 'house' }).then(
+        (res: any) => {
+          const first = res.geoObjects.get(0);
+          if (first) {
+            const coords = first.geometry.getCoordinates();
+            this.toPlacemark = new ymaps.Placemark(
+              coords,
+              {
+                iconCaption: 'Назначение',
+                balloonContent: 'Назначение: ' + to
+              },
+              { preset: 'islands#greenDotIcon' }
+            );
+            this.map.geoObjects.add(this.toPlacemark);
+          }
+        },
+        () => {}
+      );
+    }
   }
 
   ngOnInit() {
@@ -62,37 +180,116 @@ export class Order {
       controls: ['zoomControl']
     });
 
-    // Обратное геокодирование: определяем ближайший адрес по координатам, подставляем в Откуда и добавляем поинт на карту
     if (lat != null && lon != null) {
       ymaps.geocode([lat, lon], { kind: 'house' }).then(
         (res: any) => {
           const first = res.geoObjects.get(0);
-          if (first?.getAddressLine) {
-            this.routeForm.controls['from'].setValue(first.getAddressLine());
+          if (first?.getAddressLine()) {
+            const address = first.getAddressLine();
+            this.routeForm.controls['from'].setValue(address);
             this.map.geoObjects.add(first);
+            
+            this.fromPlacemark = new ymaps.Placemark(
+              [lat, lon],
+              {
+                iconCaption: 'Отправление',
+                balloonContent: 'Отправление: ' + address
+              },
+              { preset: 'islands#orangeDotIcon' }
+            );
+            this.map.geoObjects.add(this.fromPlacemark);
           }
         },
         () => { }
       );
     }
 
-    // Подключаем подсказки адресов к полям от яндекса
-    (new ymaps.SuggestView('from')).events.add('select', (event: any) => (this.routeForm.controls['from'].setValue(event.get('item')?.value ?? '')));
-    (new ymaps.SuggestView('to')).events.add('select', (event: any) => (this.routeForm.controls['to'].setValue(event.get('item')?.value ?? '')));
+    const fromSuggest = new ymaps.SuggestView('from');
+    fromSuggest.events.add('select', (event: any) => {
+      const address = event.get('item')?.value ?? '';
+      this.routeForm.controls['from'].setValue(address);
+      this.createPlacemark(address, true);
+      this.resetState();
+    });
+
+    const toSuggest = new ymaps.SuggestView('to');
+    toSuggest.events.add('select', (event: any) => {
+      const address = event.get('item')?.value ?? '';
+      this.routeForm.controls['to'].setValue(address);
+      this.createPlacemark(address, false);
+      this.resetState();
+    });
+
+    const fromInput = document.getElementById('from') as HTMLInputElement;
+    const toInput = document.getElementById('to') as HTMLInputElement;
+    
+    fromInput?.addEventListener('input', () => {
+      this.resetState();
+      if (this.fromPlacemark) {
+        this.map.geoObjects.remove(this.fromPlacemark);
+        this.fromPlacemark = null;
+      }
+    });
+    
+    toInput?.addEventListener('input', () => {
+      this.resetState();
+      if (this.toPlacemark) {
+        this.map.geoObjects.remove(this.toPlacemark);
+        this.toPlacemark = null;
+      }
+    });
+
+    fromInput?.addEventListener('keydown', (event: KeyboardEvent) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        const address = this.routeForm.get('from')?.value;
+        if (address && address.trim().length > 3) {
+          this.createPlacemark(address, true);
+        }
+      }
+    });
+
+    toInput?.addEventListener('keydown', (event: KeyboardEvent) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        const address = this.routeForm.get('to')?.value;
+        if (address && address.trim().length > 3) {
+          this.createPlacemark(address, false);
+        }
+      }
+    });
+
+    fromInput?.addEventListener('blur', () => {
+      const address = this.routeForm.get('from')?.value;
+      if (address && address.trim().length > 3) {
+        this.createPlacemark(address, true);
+      }
+    });
+
+    toInput?.addEventListener('blur', () => {
+      const address = this.routeForm.get('to')?.value;
+      if (address && address.trim().length > 3) {
+        this.createPlacemark(address, false);
+      }
+    });
   }
 
   public selectSize(size: string) {
     this.routeForm.controls['size'].setValue(size);
+    this.resetState();
   }
 
   public selectSpeed(speed: string) {
     this.routeForm.controls['speed'].setValue(speed);
+    this.resetState();
   }
 
   public calculate() {
-    this.calculationResult.set(null);
+    this.resetState();
+    this.isLoading.set(true);
 
     if (!this.map || this.routeForm.invalid) {
+      this.isLoading.set(false);
       return;
     }
 
@@ -105,11 +302,16 @@ export class Order {
 
     this.mapRoute = new ymaps.multiRouter.MultiRoute(
       { referencePoints: [from, to] },
-      { boundsAutoApply: false }
+      {
+        boundsAutoApply: false,
+        wayPointVisible: false,
+        viaPointVisible: false
+      }
     );
     this.map.geoObjects.add(this.mapRoute);
 
     this.mapRoute.model.events.add('requestsuccess', () => {
+      this.isLoading.set(false);
       try {
         const activeRoute = this.mapRoute.getActiveRoute();
         if (!activeRoute) {
@@ -140,16 +342,23 @@ export class Order {
           total,
           speed
         });
+
+        this.updatePlacemarksAddress(from, to);
+
       } catch (err) {
         this.failedCalculation();
       }
     });
 
-    this.mapRoute.model.events.add('requestfail', () => this.failedCalculation());
+    this.mapRoute.model.events.add('requestfail', () => {
+      this.isLoading.set(false);
+      this.failedCalculation();
+    });
   }
 
   private failedCalculation() {
     this.calculationResult.set(null);
+    this.isLoading.set(false);
     this.toastr.error('Не удалось построить маршрут. Проверьте адреса и выбранные параметры.');
   }
 

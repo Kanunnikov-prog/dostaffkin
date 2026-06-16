@@ -22,6 +22,7 @@
             "outputPath": {"base": "docs","browser": ""},
             "baseHref": "/dostaffkin/",
             "assets": [
+              "src/assets",
               {
                 "glob": "**/*",
                 "input": "public"

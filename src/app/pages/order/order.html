@@ -1,24 +1,30 @@
 <div id="map"></div>
 <app-header />
 <aside class="main" id="sidebar">
+    <!-- Оверлей с лоадером -->
+    <div class="main-overlay" [class.is-visible]="isLoading()">
+        <div class="loader"></div>
+    </div>
+
     <div class="main-header">
         <div class="main-title">Оформление доставки</div>
         <div class="main-text">Выберите параметры для расчета отправления</div>
     </div>
-    <div class="main-content">
+    <div class="main-content" [class.loading]="isLoading()">
         <div class="main-route" [formGroup]="routeForm">
             <div class="main-block-title">Маршрут</div>
             <div class="main-fields">
                 <div class="main-field" id="fromField">
                     <div class="main-pin"></div>
                     <input id="from" formControlName="from" placeholder="Откуда: начните вводить адрес"
-                        autocomplete="off" />
+                        autocomplete="off" (focus)="$event.target.select()" />
                     <div class="main-ac" id="fromAc" role="listbox" aria-label="Подсказки адресов"></div>
                 </div>
 
                 <div class="main-field" id="toField">
                     <div class="main-pin"></div>
-                    <input id="to" formControlName="to" placeholder="Куда: начните вводить адрес" autocomplete="off" />
+                    <input id="to" formControlName="to" placeholder="Куда: начните вводить адрес" autocomplete="off"
+                        (focus)="$event.target.select()" />
                     <div class="main-ac" id="toAc" role="listbox" aria-label="Подсказки адресов"></div>
                 </div>
             </div>
@@ -56,7 +62,7 @@
             </div>
         </div>
         <div class="main-calculate-block">
-            <button id="calc" class="button calculate-button" type="button" [disabled]="routeForm.invalid"
+            <button id="calc" class="button calculate-button" type="button" [disabled]="routeForm.invalid || isLoading()"
                 (click)="calculate()">Рассчитать</button>
         </div>
         <div class="main-result" id="result">
@@ -83,24 +89,11 @@
                     <div class="main-block-title">Контакты</div>
                     <div class="order-fields">
                         <div class="main-field">
-                            <input id="customerName" formControlName="name" placeholder="Ваше имя" autocomplete="off" />
+                            <input id="customerName" formControlName="name" placeholder="Ваше имя" autocomplete="off" (focus)="$event.target.select()"/>
                         </div>
                         <div class="main-field">
                             <input id="customerPhone" formControlName="phone" placeholder="Ваш телефон"
-                                autocomplete="off" inputmode="tel" />
-                        </div>
-
-                        <div>
-                            @if (this.orderForm.get('name')?.invalid && (this.orderForm.get('name')?.dirty ||
-                            this.orderForm.get('name')?.touched)) {
-                            <label for="customerName" class="input-error">Заполните имя</label>
-                            }
-                        </div>
-                        <div>
-                            @if (this.orderForm.get('phone')?.invalid && (this.orderForm.get('phone')?.dirty ||
-                            this.orderForm.get('phone')?.touched)) {
-                            <label for="customerName" class="input-error">Заполните телефон</label>
-                            }
+                                autocomplete="off" inputmode="tel" (focus)="$event.target.select()"/>
                         </div>
                     </div>
                 </div>
@@ -112,7 +105,7 @@
                     </div>
                 </div>
                 <button id="submit" class="button main-submit-request" type="button"
-                    [disabled]="!calculationResult() || orderForm.invalid" (click)="submitOrder()">Отправить заявку
+                    [disabled]="!calculationResult() || orderForm.invalid || isLoading()" (click)="submitOrder()">Отправить заявку
                 </button>
             </div>
 
